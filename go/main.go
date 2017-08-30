@@ -409,7 +409,6 @@ type Tournament struct {
 func NewTournament(teams []string) *Tournament {
 	turns, nameSizes := teamsByTurn(teams)
 	columns := columns(nameSizes)
-	// create grid and fill it with spaces
 	rows := 1<<uint(len(turns)-1)*2 - 1
 	cols := columns[len(turns)-1] + nameSizes[len(nameSizes)-1] + 2
 	grid := make([][]string, rows)
@@ -432,8 +431,11 @@ func NewTournament(teams []string) *Tournament {
 func (t Tournament) Print() {
 	if len(t.turns) > 0 {
 		// before printing, go to browse the tree and fill the grid
-		t.browseTree(t.turns[0][0], -1, 1<<uint(len(t.turns)-1)-1)
-		// we are coming back: render the grid
+		initialRow := 1<<uint(len(t.turns)-1) - 1
+		t.browseTree(t.turns[0][0], 0, initialRow)
+		// we are coming back: print the winner in grid
+		t.printPlayer(t.turns[0][0], "", len(t.turns)-1, initialRow)
+		// render the grid
 		for i := range t.grid {
 			p := strings.TrimRight(strings.Join(t.grid[i], ""), " ")
 			// get rid of all blank lines
@@ -463,16 +465,15 @@ func (t Tournament) printPlayer(player, diagonal string, index, row int) {
 	}
 }
 
-// search for a player in the next turn
+// search for a player in a turn
 func (t Tournament) findPlayerInTurn(iTurn int, player string) (team []string) {
-	if iTurn > len(t.turns)-1 || len(t.turns[iTurn]) == 0 {
+	if iTurn > len(t.turns)-1 {
 		return
 	}
-	for i, pair := range t.turns[iTurn] {
-		if strings.Contains(pair, player) {
-			team = strings.Split(pair, " ")
-			t.turns[iTurn] = append(t.turns[iTurn][:i], t.turns[iTurn][i+1:]...)
-			return
+	for _, pair := range t.turns[iTurn] {
+		p := strings.Split(pair, " ")
+		if len(p) == 2 && (player == p[0] || player == p[1]) {
+			return p
 		}
 	}
 	return
@@ -481,60 +482,48 @@ func (t Tournament) findPlayerInTurn(iTurn int, player string) (team []string) {
 // dfs: sort of...
 func (t Tournament) browseTree(player string, iTurn, row int) {
 	iTurn++
-	if len(t.turns)-1 < iTurn || len(t.turns[iTurn]) == 0 {
+
+	team := t.findPlayerInTurn(iTurn, player)
+	if team == nil {
 		return
 	}
 
-	team := t.findPlayerInTurn(iTurn, player)
+	up, down := team[0], team[1]
 
-	switch len(team) {
-	case 1:
-		// winner case
-		up := team[0]
-		t.browseTree(up, iTurn, row)
-		t.printPlayer(up, "", len(t.turns)-1, row)
-	case 2:
-		// team case
-		up, down := team[0], team[1]
+	// what is index ?
+	// index is the reverse iTurn.
+	// eg: working backwards, winner is at indice 0 but at the end on the original array.
+	// if we have one array and the same array reverse, index is the indice from the end
+	// of the original array (cf example in 'offset' comment)
+	index := len(t.turns) - 1 - iTurn
 
-		// what is index ?
-		// index is the reverse iTurn.
-		// eg: working backwards, winner is at indice 0 but at the end on the original array.
-		// if we have one array and the same array reverse, index is the indice from the end
-		// of the original array (cf example in 'offset' comment)
-		index := len(t.turns) - 1 - iTurn
+	// what is offset ?
+	// offset is 2^index (value to add or subtract to previous row)
+	// rule is: row =  previous row -/+ offset
+	// eg:
+	// t.turns:         [ [ "RAGE" ] [  "ZEN    RAGE" ] [  "HAM   ZEN",  "LARGE  RAGE" ] ]
+	// iTurn:                 0              1                        2
+	// index:                 2              1                        0
+	// initial row            2^(len(t.turns)-1) = 4
+	// -/+ offset:                      -2^1    +2^1      -2^0   +2^0     -2^0   +2^0
+	// row                    4         4-2=2   4+2=6     2-1=1  2+1=3    6-1=5  6+1=7
+	// t.turns:         [ [ "RAGE" ] [  "ZEN    RAGE" ] [  "HAM   ZEN",  "LARGE  RAGE" ] ]
+	// eg: graph to print:
+	// 1 _HAM___
+	// 2        \_ZEN__
+	// 3 _ZEN___/      \
+	// 4                \_RAGE_
+	// 5 _LARGE_        /
+	// 6        \_RAGE_/
+	// 7 _RAGE__/
+	// so, we know on which row to write a player (columns are already in the struct)
+	offset := int(1 << uint(index))
 
-		// what is offset ?
-		// offset is 2^index (value to add or subtract to previous row)
-		// rule is: row =  previous row -/+ offset
-		// eg:
-		// t.turns:         [ [ "RAGE" ] [  "ZEN    RAGE" ] [  "HAM   ZEN",  "LARGE  RAGE" ] ]
-		// iTurn:                 0              1                        2
-		// index:                 2              1                        0
-		// initial row            2^(len(t.turns)-1) = 4
-		// -/+ offset:                      -2^1    +2^1      -2^0   +2^0     -2^0   +2^0
-		// row                    4         4-2=2   4+2=6     2-1=1  2+1=3    6-1=5  6+1=7
-		// t.turns:         [ [ "RAGE" ] [  "ZEN    RAGE" ] [  "HAM   ZEN",  "LARGE  RAGE" ] ]
-		// eg: graph to print:
-		// 1 _HAM___
-		// 2        \_ZEN__
-		// 3 _ZEN___/      \
-		// 4                \_RAGE_
-		// 5 _LARGE_        /
-		// 6        \_RAGE_/
-		// 7 _RAGE__/
-		// so, we know on which row to write a player (columns are already in the struct)
-		offset := int(1 << uint(index))
+	t.browseTree(up, iTurn, row-offset)
+	t.printPlayer(up, "\\", index, row-offset)
 
-		row += -offset
-		t.browseTree(up, iTurn, row)
-		t.printPlayer(up, "\\", index, row)
-
-		// we need to add offset twice because row was previously set to row-offset
-		row += offset * 2
-		t.browseTree(down, iTurn, row)
-		t.printPlayer(down, "/", index, row)
-	}
+	t.browseTree(down, iTurn, row+offset)
+	t.printPlayer(down, "/", index, row+offset)
 }
 
 func main() {
